@@ -29,7 +29,6 @@
   max-width: 80%;
   padding: 0.5rem 1rem;
   border-radius: 0.5rem;
-  white-space: pre-wrap;
 }
 
 .message.user {
@@ -46,6 +45,82 @@
 
 .messageContent {
   line-height: 1.5;
+}
+
+/* Markdown Styles */
+.markdown {
+  width: 100%;
+}
+
+.markdown p {
+  margin: 0.5rem 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 1rem 0 0.5rem 0;
+  font-weight: 600;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.markdown li {
+  margin: 0.25rem 0;
+}
+
+.markdown code {
+  background-color: #2d3748;
+  color: #e2e8f0;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem;
+  font-family: monospace;
+  font-size: 0.875em;
+}
+
+.markdown pre {
+  margin: 1rem 0;
+  padding: 1rem;
+  background-color: #2d3748;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  background-color: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.markdown blockquote {
+  margin: 1rem 0;
+  padding-left: 1rem;
+  border-left: 4px solid #cbd5e1;
+  color: #64748b;
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.markdown th,
+.markdown td {
+  padding: 0.5rem;
+  border: 1px solid #cbd5e1;
+  text-align: left;
+}
+
+.markdown th {
+  background-color: #f1f5f9;
 }
 
 .loading {

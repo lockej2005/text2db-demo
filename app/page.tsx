@@ -2,6 +2,9 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import styles from './page.module.css';
 
 interface Message {
@@ -37,7 +40,6 @@ export default function Home() {
       content: input.trim()
     };
 
-    // Create loading message immediately
     const assistantMessage: Message = {
       id: (Date.now() + 1).toString(),
       type: 'assistant',
@@ -88,7 +90,6 @@ export default function Home() {
           currentContent += chunk;
         }
 
-        // Update the existing assistant message
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessage.id
             ? { ...msg, content: currentContent, isLoading: false }
@@ -97,7 +98,6 @@ export default function Home() {
       }
     } catch (error) {
       console.error('Error:', error);
-      // Update the loading message to show the error
       setMessages(prev => prev.map(msg => 
         msg.id === assistantMessage.id
           ? { ...msg, content: 'Sorry, I encountered an error processing your request.', isLoading: false }
@@ -105,6 +105,27 @@ export default function Home() {
       ));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Custom components for ReactMarkdown
+  const components = {
+    code({ node, inline, className, children, ...props }: any) {
+      const match = /language-(\w+)/.exec(className || '');
+      return !inline && match ? (
+        <SyntaxHighlighter
+          style={dracula}
+          language={match[1]}
+          PreTag="div"
+          {...props}
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      ) : (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
     }
   };
 
@@ -131,7 +152,16 @@ export default function Home() {
               className={`${styles.message} ${msg.type === 'user' ? styles.user : styles.assistant}`}
             >
               <div className={`${styles.messageContent} ${msg.isLoading ? styles.loading : ''}`}>
-                {msg.content}
+                {msg.type === 'assistant' ? (
+                  <ReactMarkdown 
+                    components={components}
+                    className={styles.markdown}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                ) : (
+                  msg.content
+                )}
               </div>
             </div>
           ))}

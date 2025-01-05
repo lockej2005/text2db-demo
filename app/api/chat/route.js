@@ -1,6 +1,7 @@
 // app/api/chat/route.js
 import { headers } from 'next/headers';
 import OpenAI from 'openai';
+import { dbSchema } from './schema';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -35,12 +36,20 @@ export async function POST(req) {
       }
     );
 
-    // Stream the run using the SDK's stream helper
+    // Run the assistant with the database schema context
     await openai.beta.threads.runs.stream(
       thread.id, 
       {
         assistant_id: ASSISTANT_ID,
-        instructions: "You are continuing a conversation. Make sure to give new and relevant responses."
+        instructions: `You are a helpful assistant with access to a delivery management database. 
+The database schema is: ${JSON.stringify(dbSchema, null, 2)}
+
+When querying the database:
+1. Use the 'query_database' function for all database operations
+2. Always use parameterized queries with :param syntax
+3. Include proper JOIN conditions when querying across tables
+4. Handle NULL values appropriately
+5. Use appropriate WHERE clauses and ORDER BY when needed`
       }
     )
     .on('textCreated', (text) => {
@@ -64,6 +73,15 @@ export async function POST(req) {
               writer.write(encoder.encode(`\n${output.logs}\n`));
             }
           });
+        }
+      }
+      
+      if (toolCallDelta.type === 'function' && toolCallDelta.function.name === 'query_database') {
+        if (toolCallDelta.function.arguments) {
+          writer.write(encoder.encode(`\nExecuting query: ${toolCallDelta.function.arguments}\n`));
+        }
+        if (toolCallDelta.function.output) {
+          writer.write(encoder.encode(`\nQuery results: ${toolCallDelta.function.output}\n`));
         }
       }
     })
