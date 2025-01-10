@@ -62,7 +62,7 @@ export async function POST(req) {
     const run = await openai.beta.threads.runs.create(
       thread,
       {
-        assistant_id: "asst_zO6D9MK8dsc4qVeCOUIQizL3",
+        assistant_id: process.env.ASSISTANT_ID,
         tools: tools,
         instructions: `You are a tax database assistant that helps analyze Australian tax-related data and provides insights.
 
