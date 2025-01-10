@@ -6,6 +6,21 @@
   color: #e2e8f0;
   overflow-y: auto;
   border-right: 1px solid #3e4c6b;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* Add margin to chatPanel to account for fixed functionPanel */
+.chatPanel {
+  width: 66.666%;
+  margin-left: 33.333%;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  background-color: #f8fafc;
+  height: 100vh;
 }
 
 .chatPanel {
@@ -45,6 +60,96 @@
 
 .messageContent {
   line-height: 1.5;
+}
+
+.loading {
+  opacity: 0.7;
+}
+
+.functionContent {
+  background-color: #2d3748;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  font-family: monospace;
+  margin-top: 1rem;
+}
+
+.functionContent pre {
+  margin: 0;
+}
+
+.functionContent code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.statusContent {
+  border-radius: 0.5rem;
+  background-color: #1e293b;
+}
+
+.statusMessage {
+  color: #94a3b8;
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.querySection {
+  margin-bottom: 1rem;
+  background-color: #1e293b;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+}
+
+.queryLabel {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.resultsSection {
+  background-color: #1e293b;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+}
+
+.resultsLabel {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.results {
+  max-height: 300px;
+  overflow-y: auto;
+  background-color: #0f172a;
+  border-radius: 0.25rem;
+}
+
+.results pre {
+  margin: 0;
+  padding: 0.75rem;
+}
+
+.results code {
+  font-family: monospace;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #e2e8f0;
+}
+
+.error {
+  color: #ef4444;
+  font-weight: 500;
+}
+
+.statusGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 /* Markdown Styles */
@@ -123,10 +228,7 @@
   background-color: #f1f5f9;
 }
 
-.loading {
-  opacity: 0.7;
-}
-
+/* Input Form Styles */
 .inputForm {
   display: flex;
   gap: 0.5rem;
@@ -150,6 +252,7 @@
   border-radius: 0.375rem;
   cursor: pointer;
   font-size: 1rem;
+  transition: background-color 0.2s;
 }
 
 .inputForm button:disabled {
@@ -157,33 +260,29 @@
   cursor: not-allowed;
 }
 
-.functionContent {
-  background-color: #2d3748;
-  padding: 1rem;
-  border-radius: 0.5rem;
-  overflow-x: auto;
-  font-family: monospace;
-  margin-top: 1rem;
+.inputForm button:hover:not(:disabled) {
+  background-color: #1d4ed8;
 }
 
-.functionContent pre {
-  margin: 0;
-}
-
-.functionContent code {
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
+/* Responsive Design */
 @media (max-width: 768px) {
-  .functionPanel,
-  .chatPanel {
+  .functionPanel {
     width: 100%;
     height: 50vh;
-  }
-
-  .functionPanel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    z-index: 10;
     border-right: none;
     border-bottom: 1px solid #3e4c6b;
+  }
+
+  .chatPanel {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 50vh;
+    height: 50vh;
   }
 }

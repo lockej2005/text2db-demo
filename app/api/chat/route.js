@@ -1,190 +1,323 @@
 // app/api/chat/route.js
-
 import OpenAI from 'openai';
-import { Pool } from 'pg';
+import pg from 'pg';
+import { broadcastStatus } from './status/route.js';
 
-// Postgres pool to your Supabase DB
-const pool = new Pool({
-  connectionString: process.env.SUPABASE_DB_URL, 
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-const queryDatabaseTool = {
-  type: 'function',
-  function: {
-    name: 'query_database',
-    description: 'Executes a SQL query with placeholders ($1, $2, etc.) plus parameter values on the deliveries DB.',
-    parameters: {
-      type: 'object',
-      properties: {
-        sql: {
-          type: 'string',
-          description: 'Full SQL statement with placeholders ($1, $2, etc.).',
-        },
-        values: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Parameter values to fill in for $1, $2, etc.',
-        },
-      },
-      required: ['sql', 'values'],
-      additionalProperties: false,
-    },
-  },
-};
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// No 'edge' runtime!
+// Initialize PostgreSQL connection pool
+const pool = new pg.Pool({
+  connectionString: process.env.SUPABASE_DB_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 export async function POST(req) {
-  console.log('--- Entering POST handler for /api/chat ---');
-  const encoder = new TextEncoder();
-  const stream = new TransformStream();
-  const writer = stream.writable.getWriter();
-
-  let functionArgsBuffer = '';
-  let currentFunctionName = null; // We'll store the function name if/when we see it
-
+  let thread = null;
+  
   try {
     const { message, threadId } = await req.json();
-    console.log('Received request JSON:', { message, threadId });
-
-    // Create or retrieve a thread
-    let thread;
-    if (threadId) {
-      console.log('Retrieving existing thread:', threadId);
-      thread = await openai.beta.threads.retrieve(threadId);
-      console.log('Thread retrieved:', thread.id);
-    } else {
-      console.log('Creating new thread...');
-      thread = await openai.beta.threads.create();
-      console.log('New thread created:', thread.id);
-    }
-
-    // Add user message
-    console.log('Adding user message to thread...');
-    await openai.beta.threads.messages.create(thread.id, {
-      role: 'user',
-      content: message,
+    
+    // Broadcast initial thinking state
+    broadcastStatus({
+      type: 'thinking',
+      message: 'Starting to process your request...'
     });
-    console.log('User message added. Now starting to stream from OpenAI...');
 
-    // Start streaming
-    await openai.beta.threads.runs
-      .stream(thread.id, {
-        assistant_id: 'asst_zO6D9MK8dsc4qVeCOUIQizL3',
-        instructions: `
-You have access to a 'deliveries' database (tables: customers, drivers, deliveries).
-Use "query_database" to read or write data, with parameterized queries ($1, $2...).
-Output final answers in plain text.
-`,
-        tools: [queryDatabaseTool],
-      })
-      .on('textDelta', (textDelta) => {
-        // Normal text partial
-        console.log('Assistant partial text:', textDelta.value);
-        writer.write(encoder.encode(textDelta.value));
-      })
-      .on('toolCallDelta', (toolCallDelta) => {
-        console.log('--- toolCallDelta event triggered ---');
-        console.log('toolCallDelta detail:', toolCallDelta);
+    // Create a new thread if no threadId provided
+    thread = threadId ? threadId : (await openai.beta.threads.create()).id;
 
-        // The function name might be missing in partial deltas
-        let fnName = toolCallDelta.function.name;
-        const partialArgs = toolCallDelta.function.arguments ?? '';
+    // Add the user's message to the thread
+    await openai.beta.threads.messages.create(thread, {
+      role: "user",
+      content: message
+    });
 
-        if (!fnName || !fnName.trim()) {
-          // If the model didn't provide a function name in this chunk,
-          // assume we're continuing the same function as before.
-          console.log('No function name found in this chunk. Using currentFunctionName:', currentFunctionName);
-          if (!currentFunctionName) {
-            // Fallback if we never got a name (like you only have one function)
-            console.log("We've never got a function name yet, defaulting to 'query_database'");
-            currentFunctionName = 'query_database';
-          }
-          fnName = currentFunctionName; 
-        } else if (fnName !== currentFunctionName) {
-          // If the model explicitly gave a new name
-          console.log('New function call started:', fnName);
-          functionArgsBuffer = '';
-          currentFunctionName = fnName;
-        }
-
-        // Accumulate partial JSON
-        console.log('Accumulating chunk:', partialArgs);
-        functionArgsBuffer += partialArgs;
-      })
-      .on('end', async () => {
-        console.log('--- Streaming ended ---');
-        console.log('functionArgsBuffer at end:', functionArgsBuffer);
-
-        // If the final function name is 'query_database' and we have a buffer:
-        if (currentFunctionName === 'query_database' && functionArgsBuffer.trim()) {
-          console.log('We have a query_database call to parse...');
-          try {
-            console.log('Attempting to parse JSON from functionArgsBuffer...');
-            const parsed = JSON.parse(functionArgsBuffer); 
-            const { sql, values } = parsed;
-            console.log('Parsed final arguments for query_database:', { sql, values });
-
-            if (!sql) {
-              console.log('No SQL found, skipping query...');
-            } else {
-              console.log('About to run query against Supabase...');
-              try {
-                const dbRes = await pool.query(sql, values);
-                const results = dbRes.rows;
-                console.log('Query successful! Results:', results);
-
-                // Return them to the stream
-                writer.write(
-                  encoder.encode(`
-Executing query: ${JSON.stringify(sql)}
-Values: ${JSON.stringify(values)}
-Results: ${JSON.stringify(results)}
-`)
-                );
-              } catch (dbError) {
-                console.log(process.env.SUPABASE_DB_URL)
-                console.log('Query failed with error:', dbError.message);
-                writer.write(encoder.encode(`Database error: ${dbError.message}\n`));
-              }
+    // Define database query function
+    const tools = [{
+      type: "function",
+      function: {
+        name: "query_database",
+        description: "Query the Australian tax database which includes: TaxPayers (basic info), ABNs (business numbers), IncomeStatements (yearly income), Deductions (claims), TaxAssessments (calculations), PaymentPlans (installments), GovernmentPrograms (funding), Allocations (program funding), and Audits (reviews). Use JOINs as needed to gather complete information.",
+        parameters: {
+          type: "object",
+          properties: {
+            sql_query: {
+              type: "string",
+              description: "The SQL query to execute. Write a proper SQL query to get the requested information. Use appropriate JOINs when combining data from multiple tables."
             }
-          } catch (err) {
-            console.error('Error parsing final function arguments:', err);
-            writer.write(encoder.encode(`Error: could not parse tool arguments => ${err}\n`));
-          }
-        } else {
-          console.log('No recognized function call to parse or functionArgsBuffer is empty.');
-        }
+          },
+          required: ["sql_query"],
+          additionalProperties: false
+        },
+        strict: true
+      }
+    }];
 
-        console.log('Closing the writer now...');
-        writer.close();
-      })
-      .on('error', (error) => {
-        console.error('--- Streaming error event triggered ---', error);
-        writer.write(encoder.encode(`Error: ${error.message}`));
-        writer.close();
+    // Create a run with specific instructions
+    const run = await openai.beta.threads.runs.create(
+      thread,
+      {
+        assistant_id: "asst_zO6D9MK8dsc4qVeCOUIQizL3",
+        tools: tools,
+        instructions: `You are a tax database assistant that helps analyze Australian tax-related data and provides insights.
+
+        COMPLETE DATABASE SCHEMA:
+
+        1. TaxPayers:
+           - taxpayer_id (SERIAL PRIMARY KEY)
+           - full_name (VARCHAR(100) NOT NULL)
+           - date_of_birth (DATE)
+           - is_business (BOOLEAN NOT NULL DEFAULT FALSE)
+           - phone_number (VARCHAR(20))
+           - email (VARCHAR(100) NOT NULL UNIQUE)
+           - address (VARCHAR(255))
+           - created_at (TIMESTAMP DEFAULT NOW())
+
+        2. ABNs:
+           - abn_id (SERIAL PRIMARY KEY)
+           - taxpayer_id (INT NOT NULL REFERENCES TaxPayers)
+           - abn_number (VARCHAR(11) NOT NULL)
+           - business_name (VARCHAR(100))
+           - registered_on (DATE DEFAULT CURRENT_DATE)
+
+        3. IncomeStatements:
+           - income_statement_id (SERIAL PRIMARY KEY)
+           - taxpayer_id (INT NOT NULL REFERENCES TaxPayers)
+           - financial_year (VARCHAR(9) NOT NULL)
+           - gross_income (NUMERIC(15,2) NOT NULL)
+           - tax_withheld (NUMERIC(15,2) DEFAULT 0)
+           - super_contribution (NUMERIC(15,2) DEFAULT 0)
+           - updated_at (TIMESTAMP DEFAULT NOW())
+
+        4. Deductions:
+           - deduction_id (SERIAL PRIMARY KEY)
+           - taxpayer_id (INT NOT NULL REFERENCES TaxPayers)
+           - financial_year (VARCHAR(9) NOT NULL)
+           - description (VARCHAR(255) NOT NULL)
+           - amount (NUMERIC(15,2) NOT NULL)
+           - created_at (TIMESTAMP DEFAULT NOW())
+
+        5. TaxAssessments:
+           - assessment_id (SERIAL PRIMARY KEY)
+           - taxpayer_id (INT NOT NULL REFERENCES TaxPayers)
+           - financial_year (VARCHAR(9) NOT NULL)
+           - total_taxable_income (NUMERIC(15,2) NOT NULL)
+           - total_tax_owed (NUMERIC(15,2) NOT NULL)
+           - tax_paid (NUMERIC(15,2) NOT NULL DEFAULT 0)
+           - refund_amount (NUMERIC(15,2) NOT NULL DEFAULT 0)
+           - issued_date (DATE NOT NULL DEFAULT CURRENT_DATE)
+
+        6. PaymentPlans:
+           - plan_id (SERIAL PRIMARY KEY)
+           - taxpayer_id (INT NOT NULL REFERENCES TaxPayers)
+           - assessment_id (INT NOT NULL REFERENCES TaxAssessments)
+           - created_date (TIMESTAMP DEFAULT NOW())
+           - status (VARCHAR(50) DEFAULT 'Active')
+
+        7. PaymentPlanInstallments:
+           - installment_id (SERIAL PRIMARY KEY)
+           - plan_id (INT NOT NULL REFERENCES PaymentPlans)
+           - due_date (DATE NOT NULL)
+           - amount (NUMERIC(15,2) NOT NULL)
+           - paid_date (DATE)
+
+        8. GovernmentPrograms:
+           - program_id (SERIAL PRIMARY KEY)
+           - program_name (VARCHAR(100) NOT NULL)
+           - description (TEXT)
+
+        9. GovernmentAllocations:
+           - allocation_id (SERIAL PRIMARY KEY)
+           - program_id (INT NOT NULL REFERENCES GovernmentPrograms)
+           - financial_year (VARCHAR(9) NOT NULL)
+           - allocated_funds (NUMERIC(15,2) NOT NULL)
+
+        10. Audits:
+            - audit_id (SERIAL PRIMARY KEY)
+            - taxpayer_id (INT NOT NULL REFERENCES TaxPayers)
+            - start_date (DATE NOT NULL)
+            - end_date (DATE)
+            - status (VARCHAR(50) DEFAULT 'Open')
+            - notes (TEXT)
+
+        Guidelines for Querying and Responses:
+        - Format all currency values with $ and commas (e.g., $1,234.56)
+        - Use financial year format YYYY-YYYY (e.g., 2024-2025)
+        - Handle taxpayer privacy appropriately (only include names when specifically requested)
+        - When joining tables, always consider the relationships and use appropriate JOIN types
+        - For financial analysis, consider both individual and aggregate data
+        - When analyzing trends, consider multiple financial years where available
+        - For business taxpayers (is_business = TRUE), include ABN information when relevant
+        - Present calculations with clear explanations of the components
+        - Use appropriate grouping and filtering based on financial years
+        - Handle NULL values appropriately in calculations
+
+        Always execute a query before responding, and base your response on the actual data returned.
+        If a query fails, explain the error and what might have caused it.`
+      }
+    );
+
+    // Poll for the run completion
+    let runStatus = await pollRunStatus(thread, run.id);
+
+    // Handle tool calls if any
+    if (runStatus.status === 'requires_action' && 
+        runStatus.required_action?.type === 'submit_tool_outputs') {
+      const toolCalls = runStatus.required_action.submit_tool_outputs.tool_calls;
+      const toolOutputs = await Promise.all(toolCalls.map(async (toolCall) => {
+        if (toolCall.function.name === 'query_database') {
+          const query = JSON.parse(toolCall.function.arguments).sql_query;
+          console.log('Executing query:', query);
+          
+          // Broadcast query execution status
+          broadcastStatus({
+            type: 'querying',
+            message: 'Executing database query...',
+            query: query
+          });
+          
+          try {
+            // Execute query using the connection pool
+            const client = await pool.connect();
+            try {
+              const result = await client.query(query);
+              console.log('Query results:', result.rows);
+
+              // Broadcast query results
+              broadcastStatus({
+                type: 'results',
+                message: 'Processing query results...',
+                query: query,
+                results: result.rows
+              });
+
+              return {
+                tool_call_id: toolCall.id,
+                output: JSON.stringify({
+                  rows: result.rows,
+                  rowCount: result.rowCount,
+                  fields: result.fields.map(f => ({
+                    name: f.name,
+                    dataType: f.dataTypeID
+                  }))
+                })
+              };
+            } finally {
+              client.release();
+            }
+          } catch (error) {
+            console.error('Database query error:', error);
+            
+            // Broadcast error status
+            broadcastStatus({
+              type: 'error',
+              message: 'Query failed',
+              error: error.message
+            });
+
+            return {
+              tool_call_id: toolCall.id,
+              output: JSON.stringify({ 
+                error: error.message,
+                details: "The query failed to execute. Please check the syntax and try again."
+              })
+            };
+          }
+        }
+      }));
+
+      // Broadcast thinking status while processing results
+      broadcastStatus({
+        type: 'thinking',
+        message: 'Analyzing query results...'
       });
 
-    console.log('Returning streaming response to client now...');
-    return new Response(stream.readable, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'X-Thread-ID': thread.id,
-      },
-    });
-  } catch (error) {
-    console.error('--- Caught top-level error in /api/chat POST ---', error);
-    if (writer) {
-      writer.write(encoder.encode(`Error: ${error.message}`));
-      writer.close();
+      // Submit tool outputs back to the assistant
+      runStatus = await openai.beta.threads.runs.submitToolOutputs(
+        thread,
+        run.id,
+        { tool_outputs: toolOutputs }
+      );
+
+      // Poll again for completion
+      runStatus = await pollRunStatus(thread, run.id);
     }
-    return new Response(
-      JSON.stringify({ error: 'Failed to process request', details: error.message }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+
+    // Get the latest message from the assistant
+    const messages = await openai.beta.threads.messages.list(thread);
+    const lastMessage = messages.data[0];
+
+    // More robust message content extraction
+    let messageContent = null;
+    if (lastMessage?.content) {
+      for (const content of lastMessage.content) {
+        if (content.type === 'text') {
+          messageContent = content.text.value;
+          break;
+        }
+      }
+    }
+
+    if (!messageContent) {
+      throw new Error('No valid response was generated by the assistant');
+    }
+
+    // Clear status when complete
+    broadcastStatus({
+      type: 'complete',
+      message: 'Response ready'
+    });
+
+    return new Response(JSON.stringify({ 
+      message: messageContent,
+      threadId: thread
+    }));
+
+  } catch (error) {
+    console.error('Error:', error);
+    
+    // Broadcast error status
+    broadcastStatus({
+      type: 'error',
+      message: 'An error occurred',
+      error: error.message
+    });
+
+    return new Response(JSON.stringify({ 
+      error: error.message || 'An unexpected error occurred',
+      threadId: thread
+    }), { 
+      status: 500 
+    });
   }
+}
+
+async function pollRunStatus(threadId, runId) {
+  let run;
+  let attempts = 0;
+  const maxAttempts = 60; // Maximum 60 seconds of polling
+
+  do {
+    run = await openai.beta.threads.runs.retrieve(threadId, runId);
+    if (['completed', 'requires_action', 'failed', 'expired'].includes(run.status)) {
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    attempts++;
+  } while (attempts < maxAttempts);
+
+  if (run.status === 'failed') {
+    throw new Error(`Assistant run failed: ${run.last_error?.message || 'Unknown error'}`);
+  }
+  
+  if (attempts >= maxAttempts) {
+    throw new Error('Assistant run timed out after 60 seconds');
+  }
+
+  return run;
 }
