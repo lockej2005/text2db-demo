@@ -2,18 +2,46 @@
 
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism';
+// Update imports for Next.js compatibility
+import dynamic from 'next/dynamic';
 import styles from './page.module.css';
 
+// Dynamically import SyntaxHighlighter
+const SyntaxHighlighter = dynamic(
+  () => import('react-syntax-highlighter').then((mod) => mod.Prism),
+  { ssr: false }
+);
+
+// Dynamically import the style
+const dracula = dynamic(
+  () => import('react-syntax-highlighter/dist/cjs/styles/prism').then((mod) => mod.dracula),
+  { ssr: false }
+);
+
+// Define TypeScript interfaces
+interface Message {
+  id: string;
+  type: 'user' | 'assistant';
+  content: string;
+  isLoading?: boolean;
+}
+
+interface OperationStatus {
+  type: 'connected' | 'thinking' | 'querying' | 'results' | 'error';
+  message?: string;
+  query?: string;
+  results?: any;
+  error?: string;
+}
+
 export default function Home() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [threadId, setThreadId] = useState(null);
-  const [operationStatus, setOperationStatus] = useState(null);
-  const messagesEndRef = useRef(null);
-  const eventSourceRef = useRef(null);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [operationStatus, setOperationStatus] = useState<OperationStatus | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   // Function to initialize SSE connection
   const initializeSSE = () => {
@@ -22,7 +50,6 @@ export default function Home() {
       eventSourceRef.current.close();
     }
 
-    // Updated path to use the GET handler in the chat route
     const eventSource = new EventSource('/api/chat');
     eventSourceRef.current = eventSource;
 
@@ -49,7 +76,6 @@ export default function Home() {
     eventSource.addEventListener('error', (error) => {
       console.error('SSE connection error:', error);
       eventSource.close();
-      // Attempt to reconnect after 5 seconds
       setTimeout(initializeSSE, 5000);
     });
   };
@@ -75,11 +101,11 @@ export default function Home() {
     if (messagesEndRef.current) {
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 100); // Small delay to ensure content is rendered
+      }, 100);
     }
   };
 
-  const [lastQueryInfo, setLastQueryInfo] = useState(null);
+  const [lastQueryInfo, setLastQueryInfo] = useState<OperationStatus | null>(null);
 
   // Update lastQueryInfo when we get query results
   useEffect(() => {
@@ -95,17 +121,17 @@ export default function Home() {
     }
   }, [isLoading]);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
 
-    const userMessage = {
+    const userMessage: Message = {
       id: Date.now().toString(),
       type: 'user',
       content: input.trim()
     };
 
-    const assistantMessage = {
+    const assistantMessage: Message = {
       id: (Date.now() + 1).toString(),
       type: 'assistant',
       content: 'Thinking...',
@@ -115,7 +141,6 @@ export default function Home() {
     setMessages(prev => [...prev, userMessage, assistantMessage]);
     setInput('');
     setIsLoading(true);
-    // Clear operation status for new request
     setOperationStatus(null);
 
     try {
@@ -152,7 +177,6 @@ export default function Home() {
           : msg
       ));
 
-      // Scroll to bottom after new message
       scrollToBottom();
 
     } catch (error) {
@@ -161,16 +185,11 @@ export default function Home() {
         msg.id === assistantMessage.id
           ? { 
               ...msg, 
-              content: `Error: ${error.message}`, 
+              content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`, 
               isLoading: false 
             }
           : msg
       ));
-    } finally {
-      // Don't clear loading state until we get the complete status
-      if (operationStatus?.type === 'complete') {
-        setIsLoading(false);
-      }
     }
   };
 
@@ -229,7 +248,7 @@ export default function Home() {
   };
 
   const components = {
-    code({ node, inline, className, children, ...props }) {
+    code({ node, inline, className, children, ...props }: any) {
       const match = /language-(\w+)/.exec(className || '');
       return !inline && match ? (
         <SyntaxHighlighter
@@ -253,14 +272,12 @@ export default function Home() {
       <div className={styles.functionPanel}>
         <h2>Current Operation</h2>
         <div className={styles.functionContent}>
-          {/* Show current operation status if loading */}
           {isLoading && operationStatus && (
             <div className={styles.statusContent}>
               {renderOperationStatus()}
             </div>
           )}
           
-          {/* Show last query info when not loading */}
           {!isLoading && lastQueryInfo && (
             <div className={styles.statusContent}>
               <div className={styles.querySection}>
