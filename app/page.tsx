@@ -22,7 +22,8 @@ export default function Home() {
       eventSourceRef.current.close();
     }
 
-    const eventSource = new EventSource('/api/chat/status');
+    // Updated path to use the GET handler in the chat route
+    const eventSource = new EventSource('/api/chat');
     eventSourceRef.current = eventSource;
 
     eventSource.addEventListener('open', () => {
@@ -48,6 +49,7 @@ export default function Home() {
     eventSource.addEventListener('error', (error) => {
       console.error('SSE connection error:', error);
       eventSource.close();
+      // Attempt to reconnect after 5 seconds
       setTimeout(initializeSSE, 5000);
     });
   };
@@ -149,6 +151,9 @@ export default function Home() {
             }
           : msg
       ));
+
+      // Scroll to bottom after new message
+      scrollToBottom();
 
     } catch (error) {
       console.error('Error:', error);
