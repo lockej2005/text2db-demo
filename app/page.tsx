@@ -2,11 +2,11 @@
 
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-// Update imports for Next.js compatibility
 import dynamic from 'next/dynamic';
+import { dracula } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import styles from './page.module.css';
 
-// Dynamically import SyntaxHighlighter
+// Only dynamically import the SyntaxHighlighter component
 const SyntaxHighlighter = dynamic(
   () => import('react-syntax-highlighter').then((mod) => mod.Prism),
   { 
@@ -14,8 +14,6 @@ const SyntaxHighlighter = dynamic(
     loading: () => <pre><code>Loading...</code></pre>
   }
 );
-// Dynamically import the style
-import { dracula } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
 // Define TypeScript interfaces
 interface Message {
@@ -26,7 +24,7 @@ interface Message {
 }
 
 interface OperationStatus {
-  type: 'connected' | 'thinking' | 'querying' | 'results' | 'error';
+  type: 'connected' | 'thinking' | 'querying' | 'results' | 'error' | 'complete';
   message?: string;
   query?: string;
   results?: any;
@@ -42,7 +40,29 @@ export default function Home() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  // Function to initialize SSE connection
+  // Rest of the component code remains the same...
+  
+  const components = {
+    code({ node, inline, className, children, ...props }: any) {
+      const match = /language-(\w+)/.exec(className || '');
+      return !inline && match ? (
+        <SyntaxHighlighter
+          style={dracula}
+          language={match[1]}
+          PreTag="div"
+          {...props}
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      ) : (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    }
+  };
+
+  // Initialize SSE connection
   const initializeSSE = () => {
     console.log('Initializing SSE connection...');
     if (eventSourceRef.current) {
@@ -244,26 +264,6 @@ export default function Home() {
         {getContent()}
       </div>
     );
-  };
-
-  const components = {
-    code({ node, inline, className, children, ...props }: any) {
-      const match = /language-(\w+)/.exec(className || '');
-      return !inline && match ? (
-        <SyntaxHighlighter
-          style={dracula}
-          language={match[1]}
-          PreTag="div"
-          {...props}
-        >
-          {String(children).replace(/\n$/, '')}
-        </SyntaxHighlighter>
-      ) : (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      );
-    }
   };
 
   return (
