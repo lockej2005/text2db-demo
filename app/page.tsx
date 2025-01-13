@@ -9,14 +9,13 @@ import styles from './page.module.css';
 // Dynamically import SyntaxHighlighter
 const SyntaxHighlighter = dynamic(
   () => import('react-syntax-highlighter').then((mod) => mod.Prism),
-  { ssr: false }
+  { 
+    ssr: false,
+    loading: () => <pre><code>Loading...</code></pre>
+  }
 );
-
 // Dynamically import the style
-const dracula = dynamic(
-  () => import('react-syntax-highlighter/dist/cjs/styles/prism').then((mod) => mod.dracula),
-  { ssr: false }
-);
+import { dracula } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
 // Define TypeScript interfaces
 interface Message {
